@@ -4,57 +4,129 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.map
-import androidx.lifecycle.viewModelScope
 import com.example.android.trackmysleepquality.database.SleepDatabaseDao
 import com.example.android.trackmysleepquality.database.SleepNight
 import com.example.android.trackmysleepquality.formatNights
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import androidx.lifecycle.map
+import androidx.lifecycle.viewModelScope
 
 /**
  * ViewModel for SleepTrackerFragment.
  */
 class SleepTrackerViewModel(
-    private val database: SleepDatabaseDao,
+    val database: SleepDatabaseDao,
     application: Application) : AndroidViewModel(application) {
+
+    /**
+     * viewModelJob allows us to cancel all coroutines started by this ViewModel.
+
+    private var viewModelJob = Job()
+
+    /**
+     * A [CoroutineScope] keeps track of all coroutines started by this ViewModel.
+     *
+     * Because we pass it [viewModelJob], any coroutine started in this uiScope can be cancelled
+     * by calling `viewModelJob.cancel()`
+     *
+     * By default, all coroutines started in uiScope will launch in [Dispatchers.Main] which is
+     * the main thread on Android. This is a sensible default because most coroutines started by
+     * a [ViewModel] update the UI after performing some processing.
+    */
+    private val uiScope = CoroutineScope(Dispatchers.Main + viewModelJob)
+     */
+
 
     private var tonight = MutableLiveData<SleepNight?>()
 
     val nights = database.getAllNights()
 
-    val startButtonVisible = tonight.map{
+    /**
+     * Converted nights to Spanned for displaying.
+     */
+    val nightsString = nights.map{nights->
+        formatNights(nights, application.resources)
+    }
+
+
+    /**
+     * If tonight has not been set, then the START button should be visible.
+     */
+    val startButtonVisible = tonight.map {
         null == it
     }
-    val stopButtonVisible = tonight.map{
+
+    /**
+     * If tonight has been set, then the STOP button should be visible.
+     */
+    val stopButtonVisible = tonight.map {
         null != it
     }
+
+    /**
+     * If there are any nights in the database, show the CLEAR button.
+     */
     val clearButtonVisible = nights.map {
-        it.isNotEmpty()
+        it?.isNotEmpty()
     }
 
+    /**
+     * Request a toast by setting this value to true.
+     *
+     * This is private because we don't want to expose setting this value to the Fragment.
+     */
     private var _showSnackbarEvent = MutableLiveData<Boolean>()
 
+    /**
+     * If this is true, immediately `show()` a toast and call `doneShowingSnackbar()`.
+     */
     val showSnackBarEvent: LiveData<Boolean>
         get() = _showSnackbarEvent
+
+    /**
+     * Variable that tells the Fragment to navigate to a specific [SleepQualityFragment]
+     *
+     * This is private because we don't want to expose setting this value to the Fragment.
+     */
+
+    private val _navigateToSleepQuality = MutableLiveData<SleepNight>()
+    /**
+     * Call this immediately after calling `show()` on a toast.
+     *
+     * It will clear the toast request, so if the user rotates their phone it won't show a duplicate
+     * toast.
+     */
 
     fun doneShowingSnackbar() {
         _showSnackbarEvent.value = false
     }
 
     /**
-     * Converted nights to Spanned for displaying.
+     * If this is non-null, immediately navigate to [SleepQualityFragment] and call [doneNavigating]
      */
-    val nightsString = nights.map { nights ->
-        formatNights(nights, application.resources)
-    }
-
-    private val _navigateToSleepQuality = MutableLiveData<SleepNight?>()
-
-    val navigateToSleepQuality: LiveData<SleepNight?>
+    val navigateToSleepQuality: LiveData<SleepNight>
         get() = _navigateToSleepQuality
 
+    /**
+     * Call this immediately after navigating to [SleepQualityFragment]
+     *
+     * It will clear the navigation request, so if the user rotates their phone it won't navigate
+     * twice.
+     */
     fun doneNavigating() {
         _navigateToSleepQuality.value = null
+    }
+
+    private val _navigateToSleepDataQuality = MutableLiveData<Long>()
+    val navigateToSleepDataQuality
+        get() = _navigateToSleepDataQuality
+
+    fun onSleepNightClicked(id: Long) {
+        _navigateToSleepDataQuality.value = id
+    }
+
+    fun onSleepDataQualityNavigated() {
+        _navigateToSleepDataQuality.value = null
     }
 
     init {
@@ -75,23 +147,31 @@ class SleepTrackerViewModel(
      *  recording.
      */
     private suspend fun getTonightFromDatabase(): SleepNight? {
+        //return withContext(Dispatchers.IO) {
         var night = database.getTonight()
         if (night?.endTimeMilli != night?.startTimeMilli) {
             night = null
         }
         return night
+        //}
     }
 
     private suspend fun clear() {
-        database.clear()
+        withContext(Dispatchers.IO) {
+            database.clear()
+        }
     }
 
     private suspend fun update(night: SleepNight) {
-        database.update(night)
+        withContext(Dispatchers.IO) {
+            database.update(night)
+        }
     }
 
     private suspend fun insert(night: SleepNight) {
-        database.insert(night)
+        withContext(Dispatchers.IO) {
+            database.insert(night)
+        }
     }
 
     /**
@@ -124,6 +204,8 @@ class SleepTrackerViewModel(
             oldNight.endTimeMilli = System.currentTimeMillis()
 
             update(oldNight)
+
+            // Set state to navigate to the SleepQualityFragment.
             _navigateToSleepQuality.value = oldNight
         }
     }
@@ -135,9 +217,24 @@ class SleepTrackerViewModel(
         viewModelScope.launch {
             // Clear the database table.
             clear()
+
             // And clear tonight since it's no longer in the database
             tonight.value = null
-            _showSnackbarEvent.value = true
         }
+
+        // Show a snackbar message, because it's friendly.
+        _showSnackbarEvent.value = true
     }
+
+    /**
+     * Called when the ViewModel is dismantled.
+     * At this point, we want to cancel all coroutines;
+     * otherwise we end up with processes that have nowhere to return to
+     * using memory and resources.
+
+    override fun onCleared() {
+    super.onCleared()
+    viewModelJob.cancel()
+    }
+     */
 }

@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.databinding.DataBindingUtil
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Observer
@@ -44,26 +43,26 @@ class SleepTrackerFragment : Fragment() {
 
         val sleepTrackerViewModel =
             ViewModelProvider(
-                this, viewModelFactory)[SleepTrackerViewModel::class.java]
+                this, viewModelFactory).get(SleepTrackerViewModel::class.java)
 
         binding.sleepTrackerViewModel = sleepTrackerViewModel
 
-        val manager = GridLayoutManager(activity,3)
+        binding.lifecycleOwner = this
 
-        binding.sleepList.layoutManager = manager
-
-        val adapter = SleepNightAdapter(SleepNightListener {
-            nightId-> Toast.makeText(context,"$nightId",Toast.LENGTH_SHORT).show()
-        })
-        binding.sleepList.adapter = adapter
-
-        sleepTrackerViewModel.nights.observe(viewLifecycleOwner, Observer {
-            it?.let {
-                adapter.submitList(it)
+        // Add an Observer on the state variable for showing a Snackbar message
+        // when the CLEAR button is pressed.
+        sleepTrackerViewModel.showSnackBarEvent.observe(viewLifecycleOwner, Observer {
+            if (it == true) { // Observed state is true.
+                Snackbar.make(
+                    requireActivity().findViewById(android.R.id.content),
+                    getString(R.string.cleared_message),
+                    Snackbar.LENGTH_SHORT // How long to display the message.
+                ).show()
+                // Reset state to make sure the snackbar is only shown once, even if the device
+                // has a configuration change.
+                sleepTrackerViewModel.doneShowingSnackbar()
             }
         })
-
-        binding.lifecycleOwner = this
 
         // Add an Observer on the state variable for Navigating when STOP button is pressed.
         sleepTrackerViewModel.navigateToSleepQuality.observe(viewLifecycleOwner, Observer { night ->
@@ -84,14 +83,28 @@ class SleepTrackerFragment : Fragment() {
             }
         })
 
-        sleepTrackerViewModel.showSnackBarEvent.observe(viewLifecycleOwner, Observer {
-            if (it == true) { // Observed state is true.
-                Snackbar.make(
-                    requireActivity().findViewById(android.R.id.content),
-                    getString(R.string.cleared_message),
-                    Snackbar.LENGTH_SHORT // How long to display the message.
-                ).show()
-                sleepTrackerViewModel.doneShowingSnackbar()
+        sleepTrackerViewModel.navigateToSleepDataQuality.observe(viewLifecycleOwner, Observer { night ->
+            night?.let {
+
+                this.findNavController().navigate(
+                    SleepTrackerFragmentDirections
+                        .actionSleepTrackerFragmentToSleepDetailFragment(night))
+                sleepTrackerViewModel.onSleepDataQualityNavigated()
+            }
+        })
+
+        val manager = GridLayoutManager(activity, 3)
+        binding.sleepList.layoutManager = manager
+
+        val adapter = SleepNightAdapter(SleepNightListener { nightId ->
+            sleepTrackerViewModel.onSleepNightClicked(nightId)
+        })
+
+        binding.sleepList.adapter = adapter
+
+        sleepTrackerViewModel.nights.observe(viewLifecycleOwner, Observer {
+            it?.let {
+                adapter.submitList(it)
             }
         })
 
